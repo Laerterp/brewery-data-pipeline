@@ -26,4 +26,4 @@ data/gold/
 
 # Ignorar logs e outputs
 logs/
-output/
+output/"data/breweries.db" 

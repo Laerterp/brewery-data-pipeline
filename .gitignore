@@ -1,0 +1,29 @@
+# Ignorar pastas do sistema Windows
+AppData/
+Local/
+*.jtx
+Thumbs.db
+
+# Ignorar arquivos de ambiente/IDE
+.venv/
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+
+# Ignorar arquivos sensíveis
+.env
+*.key
+*.pem
+*.secret
+
+# Ignorar dados temporários/processados
+data/bronze/
+data/silver/
+data/gold/
+*.parquet
+*.csv
+
+# Ignorar logs e outputs
+logs/
+output/

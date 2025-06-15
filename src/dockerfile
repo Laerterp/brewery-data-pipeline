@@ -1,0 +1,14 @@
+# docker/Dockerfile
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Instala dependências
+COPY src/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copia o código
+COPY src/ /app/
+
+# Define o comando padrão (pode ser sobrescrito pelo Airflow)
+CMD ["python", "bronze_to_silver.py"]

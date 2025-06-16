@@ -166,7 +166,7 @@ Custo-Eficiência: Ler apenas partições relevantes reduz I/O
 Organização: Estrutura auto-documentada
 
 
-## Camada Silver para SQLite (Persistência)
+📊 ## Camada Silver para SQLite (Persistência)
 
 **Objetivo**: Criar um banco de dados relacional para análise ad-hoc e preparação da camada Gold
 
@@ -196,74 +196,21 @@ for file in parquet_files:
     table_name = "breweries_" + file.split("/")[-2].replace("=", "_")  # Ex: breweries_estado_provincia_CA
     df.to_sql(table_name, conn, if_exists='replace', index=False)
 
+Próximos passos --- 📊 Modelagem Dimensional (Camada Gold)
+A modelagem dimensional foi implementada com base em um esquema estrela, otimizando a consulta analítica e facilitando agregações de dados por localização, tipo e status operacional das cervejarias.
 
-Próximos Passos (Camada Gold)
-**Objetivo**: Dados enriquecidos e agregados para análise business intelligence
+Essa estrutura permite responder perguntas como:
 
-Consolidação e Limpeza
-1. Unificação de Fontes
+Quantas cervejarias existem por estado e tipo?
 
-CREATE TABLE gold.consolidated_breweries AS
-SELECT * FROM breweries_bycity
-UNION
-SELECT * FROM breweries_bycountry
-UNION
-SELECT * FROM breweries_bydist;
+Qual a proporção de microcervejarias em determinado país?
 
- Tratamento de Duplicatas
+Como as cervejarias coreanas se comparam globalmente?
 
--- Identificação
-SELECT id, COUNT(*) as duplicates 
-FROM consolidated_breweries
-GROUP BY id
-HAVING COUNT(*) > 1;
-
--- Correção (usando ROW_NUMBER para selecionar o registro mais completo)
-CREATE TABLE gold.breweries_deduplicated AS
-SELECT * FROM (
-    SELECT *,
-           ROW_NUMBER() OVER (PARTITION BY id ORDER BY 
-               CASE WHEN name IS NOT NULL THEN 0 ELSE 1 END,
-               CASE WHEN address_1 IS NOT NULL THEN 0 ELSE 1 END) AS rn
-    FROM consolidated_breweries
-) WHERE rn = 1;
-
-Consulta SQL para análise de cervejarias por estado e tipo
-SELECT 
-    b.state,
-    b.brewery_count AS total_breweries,
-    m.brewery_type,
-    COUNT(m.brewery_type) AS type_count
-FROM 
-    breweries_by_state_20250614_194248 AS b
-LEFT JOIN 
-    micro_states_20250614_194849 AS m ON b.state = m.state
-GROUP BY 
-    b.state, b.brewery_count, m.brewery_type
-ORDER BY 
-    b.state, type_count DESC;
-
-Comparativo Coreanas vs Globais
-
-CREATE VIEW gold.korean_vs_global AS
-SELECT 
-    type,
-    SUM(CASE WHEN source = 'Korean' THEN count ELSE 0 END) as korean,
-    SUM(CASE WHEN source = 'Global' THEN count ELSE 0 END) as global,
-    ROUND(SUM(CASE WHEN source = 'Korean' THEN count ELSE 0 END) * 100.0 / 
-         SUM(count), 2) as korean_percentage
-FROM (
-    SELECT 'micro' as type, source, COUNT(*) as count FROM combined_view GROUP BY 1,2
-    UNION ALL
-    SELECT 'nan
-
-
-Modelagem Dimensional (Camada Gold)
-
-**Objetivo**: Estruturar dados para análise OLAP com dimensões hierárquicas e métricas de negócio
-
-##  Esquema Estrela
-```mermaid
+🛠️ Estrutura do Esquema Estrela
+mermaid
+Copiar
+Editar
 erDiagram
     FACT_BREWERIES ||--o{ DIM_LOCATION : "localiza"
     FACT_BREWERIES ||--|{ DIM_BREWERY_TYPE : "classifica"
@@ -276,85 +223,57 @@ erDiagram
         date created_at
         date updated_at
     }
+🗺️ Dimensão Geográfica – dim_location
+Hierarquia natural: Country → State → City → Postal Code.
 
- Tabelas de Dimensão
-1. DIM_LOCATION (Geografia)
-sql
-CREATE TABLE dim_location AS
-SELECT DISTINCT
-    ROW_NUMBER() OVER (ORDER BY city, estado_provincia, country) AS location_id,
-    city,
-    estado_provincia AS state,
-    country,
-    codigo_postal AS postal_code,
-    longitude,
-    latitude
-FROM consolidated_breweries;
-Hierarquia Natural:
+A tabela geográfica foi construída a partir dos dados únicos de cidade, estado e país, com identificação por location_id:
 
-text
-Country → State → City → Postal Code
-Atributos Chave:
+Campo	Descrição
+city	Cidade da cervejaria
+state	Estado/província
+country	País
+postal_code	Código postal (zipcode)
+latitude/longitude	Coordenadas geográficas
+full_location_description	Texto completo do local
 
-Coordenadas geográficas (lat/long)
+Apenas registros com cidade e país foram considerados válidos.
 
-Descrição completa (full_location_description)
+🍺 Dimensão de Tipo – dim_tipocervejarias
+Essa dimensão categoriza o tipo de cervejaria com uma descrição legível, útil para filtros e segmentações.
 
-2. DIM_BREWERY_TYPE (Tipologia)
-sql
-CREATE TABLE dim_tipocervejarias AS
-SELECT DISTINCT
-    ROW_NUMBER() OVER (ORDER BY tipos_cervejaria) AS type_id,
-    tipos_cervejaria AS brewery_type,
-    CASE 
-        WHEN tipos_cervejaria = 'micro' THEN 'Microcervejaria'
-        WHEN tipos_cervejaria = 'brewpub' THEN 'Pub cervejeiro'
-        -- ... outros mapeamentos
-    END AS type_description
-FROM breweries_consolidated;
-Categorias:
+brewery_type (API)	Descrição legível
+micro	Microcervejaria
+brewpub	Pub cervejeiro
+large	Grande cervejaria
+planning	Planejamento
+contract	Contrato
+closed	Fechada
+regional	Regional
+outros	Outro tipo
 
-Micro
+✅ Dimensão de Status – dim_status
+Criada com base na presença ou ausência de telefone. Ausência indica cervejaria inativa.
 
-Brewpub
+Status	Descrição Operacional
+Ativo	Cervejaria operacional
+Inativo	Cervejaria não operacional (sem telefone)
 
-Large
+🧮 Tabela Fato – fact_breweries
+A tabela fato conecta todas as dimensões e armazena os registros únicos de cada cervejaria, permitindo análises cruzadas.
 
-Contract
+Campo	Descrição
+brewery_id	ID único da cervejaria
+location_id	FK para localização geográfica
+type_id	FK para tipo de cervejaria
+status_id	FK para status operacional
+created_at	Data de inserção
+updated_at	Data da última atualização
 
-Planning
-
-3. DIM_STATUS (Operacionalidade)
-sql
-CREATE TABLE dim_status AS
-SELECT DISTINCT
-    ROW_NUMBER() OVER (ORDER BY status) AS status_id,
-    status,
-    CASE 
-        WHEN status = 'Inativo' THEN 'Cervejaria não operacional'
-        ELSE 'Cervejaria operacional'
-    END AS status_description
-FROM (
-    SELECT DISTINCT CASE WHEN phone = 'N/A' THEN 'Inativo' ELSE 'Ativo' END AS status
-    FROM breweries_consolidated
-);
-
-CREATE TABLE fact_breweries AS
-SELECT 
-    c.id AS brewery_id,
-    l.location_id,
-    t.type_id,
-    s.status_id,
-    CURRENT_TIMESTAMP AS created_at, -- Valor padrão
-    CURRENT_TIMESTAMP AS updated_at  -- Valor padrão
-FROM consolidated_breweries c
-JOIN dim_location l ON c.city = l.city AND c.estado_provincia = l.state
-JOIN dim_tipocervejarias t ON c.tipos_cervejaria = t.brewery_type
-JOIN dim_status s ON CASE WHEN c.phone = 'N/A' THEN 'Inativo' ELSE 'Ativo' END = s.status;
-
-
- Análises Habilitadas
+🔍 Exemplos de Consultas Analíticas
 1. Distribuição Geográfica por Tipo
+sql
+Copiar
+Editar
 SELECT 
     l.country,
     l.state,
@@ -365,29 +284,56 @@ FROM fact_breweries f
 JOIN dim_location l ON f.location_id = l.location_id
 JOIN dim_tipocervejarias t ON f.type_id = t.type_id
 GROUP BY 1, 2, 3;
-
-2. Comparativo de tabela Coreano 
-
-WITH korean_stats AS (
-    SELECT 
-        l.state,
-        COUNT(DISTINCT CASE WHEN k.state IS NOT NULL THEN f.brewery_id END) AS korean_count
-    FROM fact_breweries f
-    JOIN dim_location l ON f.location_id = l.location_id
-    LEFT JOIN korean_breweries_by_state k ON l.state = k.state
-    GROUP BY 1
-)
+2. Análise com Microcervejarias (Externa)
 SELECT 
-    l.state,
-    l.country,
-    COUNT(*) AS total,
-    k.korean_count,
-    ROUND(k.korean_count * 100.0 / COUNT(*), 1) AS korean_percentage
-FROM fact_breweries f
-JOIN dim_location l ON f.location_id = l.location_id
-LEFT JOIN korean_stats k ON l.state = k.state
-GROUP BY 1, 2, 4;
+    COALESCE(l.state, k.state) AS state,
+    COALESCE(l.country, 'South Korea') AS country,
+    c.tipos_cervejaria,
+    COUNT(DISTINCT c.id) AS brewery_count,
+    k.brewery_count AS korean_brewery_count
+FROM 
+    consolidated_breweries c
+LEFT JOIN 
+    dim_location l ON c.state = l.state AND c.country = l.country
+LEFT JOIN 
+    korean_breweries_by_state_20250614_192933 k ON c.state = k.state
+GROUP BY 
+    COALESCE(l.state, k.state),
+    COALESCE(l.country, 'South Korea'),
+    c.tipos_cervejaria,
+    k.brewery_count
+ORDER BY 
+    COALESCE(l.country, 'South Korea'), 
+    COALESCE(l.state, k.state);
 
+🍺 Quantidade de Cervejarias por Tipo e Localização
+Estado/Província	País	Tipo	Quantidade
+Bouche du Rhône	France	micro	1
+Gangwondo	South Korea	brewpub	1
+Jeollabukdo	South Korea	brewpub	1
+Seoul	South Korea	brewpub	1
+California	United States	brewpub	14
+California	United States	closed	4
+California	United States	contract	1
+California	United States	large	5
+California	United States	micro	24
+California	United States	planning	3
+California	United States	regional	2
+Colorado	United States	brewpub	1
+Oklahoma	United States	micro	1
+Texas	United States	micro	1
+Wisconsin	United States	micro	1
+
+Essa view responde a umas das perguntas do case que é quantidade de cervejarias por tipo e localização.
+
+🎯 Benefícios da Modelagem
+Estrutura simplificada para análise com ferramentas como Power BI e Tableau.
+
+Performance otimizada com uso de formato columnar (ex: Parquet na camada Silver).
+
+Flexibilidade para integrar fontes externas (ex: Coreia, microcervejarias).
+
+Facilidade na construção de dashboards e KPIs.
 
 ✍️ Autor
 

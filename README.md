@@ -335,6 +335,116 @@ Flexibilidade para integrar fontes externas (ex: Coreia, microcervejarias).
 
 Facilidade na construção de dashboards e KPIs.
 
+
+
+
+## Demonstração de Conhecimento em Orquestração de Dados com Apache Airflow
+
+Documentação do Pipeline de Dados de Cervejaria
+Ferramenta de Orquestração: Apache Airflow (Docker)
+Repositório: brewery-data-pipeline
+
+1. Estrutura Atual
+1.1 Containers Docker
+Serviços Principais:
+
+airflow-apiserver: Interface web (porta 8080)
+
+airflow-scheduler: Agendamento de DAGs
+
+airflow-worker: Execução de tarefas
+
+postgres: Banco de dados (porta 5432)
+
+redis: Broker para Celery (porta 6379)
+
+1.2 Diretórios
+dags/: Armazena as DAGs (ex: brewery_pipeline.py)
+
+logs/: Logs de execução
+
+plugins/: Operadores customizados (se necessário)
+
+1.3 Credenciais Padrão
+Airflow UI: http://localhost:8080
+
+Usuário: airflow
+
+Senha: airflow
+
+2. Monitoramento e Alertas
+2.1 Objetivos
+Detectar falhas no pipeline (erros em tarefas).
+
+Identificar problemas de qualidade (dados inconsistentes, nulos, etc.).
+
+Alertar em tempo real via Slack e e-mail.
+
+2.2 Implementação
+A. Monitoramento Básico
+Ferramenta	Função
+Airflow UI	Visualização manual do status das DAGs (Success, Failed, Running).
+Prometheus	Coleta métricas (ex: tempo de execução, tarefas falhas).
+Grafana	Dashboard com métricas em tempo real (ex: DAGs falhas nas últimas 24h).
+B. Alertas Automatizados
+Canal	Configuração
+E-mail	Variáveis no docker-compose.yaml (SMTP) + email_on_failure=True nas DAGs.
+Slack	Webhook + Callback nas DAGs (ex: on_failure_callback=slack_fail_alert).
+Exemplo de Callback para Slack:
+
+python
+def slack_fail_alert(context):  
+    message = f"""  
+    :red_circle: Falha na DAG `{context['dag'].dag_id}`.  
+    *Tarefa*: `{context['task'].task_id}`  
+    *Erro*: `{context['exception']}`  
+    *Log*: {context['task_instance'].log_url}  
+    """  
+    SlackWebhookOperator(  
+        task_id='slack_alert',  
+        slack_webhook_conn_id='slack_default',  
+        message=message  
+    ).execute(context)  
+C. Validação de Dados
+Checks na DAG:
+
+python
+def validate_data(**context):  
+    data = context['ti'].xcom_pull(task_ids='extract_data')  
+    if data.empty:  
+        raise ValueError("Dados vazios!")  
+    if data.duplicated().sum() > 0:  
+        context['ti'].log.warning("Dados duplicados encontrados!")  
+Ferramentas:
+
+Great Expectations: Valida esquemas e estatísticas dos dados.
+
+SQL Operators: Consultas para verificar consistência no PostgreSQL.
+
+3. Tratamento de Falhas
+Estratégia	Implementação
+Retentativas	retries=3 e retry_delay=timedelta(minutes=5) nas DAGs.
+Timeouts	execution_timeout=timedelta(minutes=30) para evitar tarefas travadas.
+Dependências	Uso de ExternalTaskSensor para verificar pré-requisitos.
+4. Próximos Passos
+Adicionar testes automatizados para as DAGs (ex: com pytest).
+
+Implementar dashboards no Grafana (ex: taxa de falhas, tempo médio de execução).
+
+Alertas para qualidade de dados (ex: notificar se >5% dos registros forem nulos).
+
+Como Executar
+Iniciar containers:
+
+bash
+docker-compose -f docker-compose.yaml up -d  
+Acessar o Airflow:
+http://localhost:8080
+
+Adicionar DAGs:
+Salve arquivos .py em dags/.
+
+
 ✍️ Autor
 
 Laerte Rocha Neves
